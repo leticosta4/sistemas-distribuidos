@@ -60,12 +60,13 @@ class ServidorJogo:
     def __init__(self):
         # O __init__ agora será executado UMA ÚNICA VEZ (Padrão Singleton implementado na main).
         self.fila = []
+        self.nomes = []
         # Mutex (Lock) necessário para evitar condições de corrida (Race Conditions)
         # caso dezenas de clientes tentem se conectar no exato mesmo milissegundo.
         self.lock = threading.Lock()
         print("[SISTEMA] Estrutura de dados do servidor iniciada.")
 
-    def iniciar_jogo(self, jogador_uri):
+    def iniciar_jogo(self, jogador_uri, jogador_nome):
         # ==========================================
         # CONCORRÊNCIA DO PYRO5 (Ownership):
         # Não instanciamos o Proxy() aqui na thread principal. 
@@ -73,7 +74,7 @@ class ServidorJogo:
         # a thread da partida (que roda em background) não terá permissão para usá-lo.
         # Por isso, guardamos apenas a STRING (URI) na fila.
         # ==========================================
-        print(f"[REDE] Novo jogador conectado. URI: {jogador_uri}")
+        print(f"[REDE] Novo jogador conectado. URI: {jogador_uri} | Nome: {jogador_nome}")
         
         # Seção Crítica: O Lock garante que apenas uma thread altere a fila por vez
         with self.lock:
@@ -121,7 +122,7 @@ class ServidorJogo:
                 # Atualiza a interface (CLI) de ambos os jogadores
                 jogador.receber_mensagem("\n" + tab.exibir())
                 outro_jogador.receber_mensagem("\n" + tab.exibir())
-                outro_jogador.receber_mensagem("Aguarde o turno do seu adversário...")
+                outro_jogador.receber_mensagem("Aguarde o turno do seu adversário...")  ##editar
 
                 # --- PONTO DE SINCRONIZAÇÃO (RPC Bloqueante) ---
                 # A thread desta partida no servidor fica pausada (bloqueada) 
@@ -133,7 +134,7 @@ class ServidorJogo:
                     vencedor = tab.verificar_vencedor()
                     
                     if vencedor:
-                        msg = f"\n{tab.exibir()}\nFim de Jogo! Jogador '{vencedor}' venceu!"
+                        msg = f"\n{tab.exibir()}\nFim de Jogo! Jogador '{vencedor}' venceu!"  #EDITAR
                         j1.receber_mensagem(msg)
                         j2.receber_mensagem(msg)
                         j1.finalizar() # Sinaliza ao cliente que ele pode encerrar seu terminal
