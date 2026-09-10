@@ -50,3 +50,9 @@ source = { virtual = "server-client-basico" }
 name = "sistemas-distribuidos"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "pyro5" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyro5", specifier = ">=5.17" }]
