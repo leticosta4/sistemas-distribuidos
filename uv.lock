@@ -2,24 +2,6 @@ version = 1
 revision = 3
 requires-python = ">=3.10"
 
-[manifest]
-members = [
-    "middleware",
-    "server-client-basico",
-    "sistemas-distribuidos",
-]
-
-[[package]]
-name = "middleware"
-version = "0.1.0"
-source = { virtual = "middleware" }
-dependencies = [
-    { name = "pyro5" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pyro5" }]
-
 [[package]]
 name = "pyro5"
 version = "5.17"
@@ -40,11 +22,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/6b/bb/58ab4dc0382c23863
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/b0/75745c948bc814d145cc46cb6da219c7acf3875822d47f08d6323ccf0458/serpent-1.43-py3-none-any.whl", hash = "sha256:7907f40151da126d57bbd675364d23898efa6b6601d79379cbae800236586b54", size = 9787, upload-time = "2026-05-30T16:30:12.027Z" },
 ]
-
-[[package]]
-name = "server-client-basico"
-version = "0.1.0"
-source = { virtual = "server-client-basico" }
 
 [[package]]
 name = "sistemas-distribuidos"

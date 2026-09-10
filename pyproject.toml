@@ -6,6 +6,3 @@ requires-python = ">=3.10"
 dependencies = [
     "pyro5>=5.17",
 ]
-
-[tool.uv.workspace]
-members = ["server-client-basico", "middleware"]

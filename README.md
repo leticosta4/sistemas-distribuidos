@@ -39,7 +39,10 @@ Exercícios de middleware com RPC usando Pyro5.
 
 ```bash
 # Servidor (em um terminal)
+uv run -m Pyro5.nameserver
+
 uv run python middleware/JVServer.py
+
 
 # Cliente (em outro terminal)
 uv run python middleware/JVClient.py
