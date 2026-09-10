@@ -5,6 +5,7 @@ Mini projetos da disciplina de Sistemas Distribuidos (UNEB).
 ## Requisitos
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- [Pyro5](https://pyro5.readthedocs.io/en/latest/index.html)
 
 ## Configuração
 
