@@ -110,7 +110,7 @@ class ServidorJogo:
         try:
             # Envia a mensagem de boas-vindas
             for jogador, simbolo in jogadores:
-                jogador.receber_mensagem(f"\n--- A partida começou! Você joga com '{simbolo}' ---")
+                jogador.receber_mensagem(f"\n--- A partida começou, {jogador.get_nome()}! Você joga com '{simbolo}' ---")
 
             atual = 0 # Índice que alterna entre 0 e 1 para gerenciar o turno
             
@@ -122,7 +122,7 @@ class ServidorJogo:
                 # Atualiza a interface (CLI) de ambos os jogadores
                 jogador.receber_mensagem("\n" + tab.exibir())
                 outro_jogador.receber_mensagem("\n" + tab.exibir())
-                outro_jogador.receber_mensagem("Aguarde o turno do seu adversário...")  ##editar
+                outro_jogador.receber_mensagem(f"Aguarde o turno do seu adversário ({jogador.get_nome()})...")
 
                 # --- PONTO DE SINCRONIZAÇÃO (RPC Bloqueante) ---
                 # A thread desta partida no servidor fica pausada (bloqueada) 
@@ -134,7 +134,8 @@ class ServidorJogo:
                     vencedor = tab.verificar_vencedor()
                     
                     if vencedor:
-                        msg = f"\n{tab.exibir()}\nFim de Jogo! Jogador '{vencedor}' venceu!"  #EDITAR
+                        vencedor_nome = j1.get_nome() if vencedor == "X" else j2.get_nome()
+                        msg = f"\n{tab.exibir()}\nFim de Jogo! {vencedor_nome} venceu!"
                         j1.receber_mensagem(msg)
                         j2.receber_mensagem(msg)
                         j1.finalizar() # Sinaliza ao cliente que ele pode encerrar seu terminal
@@ -153,7 +154,7 @@ class ServidorJogo:
                 else:
                     # Se a jogada falhar (posição ocupada), o turno NÃO alterna.
                     # O mesmo jogador será cobrado novamente no próximo ciclo do while.
-                    jogador.receber_mensagem("Jogada inválida! A posição pode estar ocupada ou fora dos limites.")
+                    jogador.receber_mensagem(f"Jogada inválida, {jogador.get_nome()}! A posição pode estar ocupada ou fora dos limites.")
                     
         except Exception as e:
             # Tratamento de resiliência: se um cliente fechar o terminal abruptamente (Broken Pipe),

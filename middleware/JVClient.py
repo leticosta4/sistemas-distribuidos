@@ -23,6 +23,9 @@ class Jogador:
         self.jogo_ativo = True
         self.nome = None
 
+    def get_nome(self):
+        return self.nome
+
     # O decorador @oneway avisa ao middleware que o servidor não precisa 
     # aguardar um "return". É o equivalente a mensagens UDP (fire-and-forget),
     # otimizando a responsividade geral do sistema.
@@ -66,11 +69,12 @@ def main():
         return
 
     # Registra este cliente na rede Pyro para que o Servidor possa invocar seus métodos
-    jogador = Jogador()
+    jogador_nome = input("Digite seu nome: ")
+    jogador = Jogador(nome=jogador_nome)
     daemon = Pyro5.api.Daemon()
     jogador_uri = daemon.register(jogador)
 
-    jogador.nome = input("Digite seu nome: ")
+    
 
     # Inicia a escuta de chamadas do servidor em uma thread em background (Daemon).
     # Se não fizéssemos isso numa thread separada, o requestLoop() travaria o código
@@ -79,7 +83,7 @@ def main():
 
     print("Conectando ao servidor... Aguardando um adversário entrar na fila.")
     # Chama o método remoto do servidor, passando o endereço do próprio cliente
-    servidor.iniciar_jogo(str(jogador_uri), jogador.nome)
+    servidor.iniciar_jogo(str(jogador_uri), jogador.get_nome())
 
     try:
         # Loop do CLI (Command Line Interface). 
