@@ -103,6 +103,22 @@ class ServidorJogo:
     # ==========================================
     # 3. MÁQUINA DE ESTADOS DA PARTIDA
     # ==========================================
+    def _processar_revanche(self, j1, j2):
+        r1 = j1.revanche()
+        r2 = j2.revanche()
+
+        if r1 and r2:
+            return True
+
+        if not r1:
+            j2.receber_mensagem(f"{j1.get_nome()} recusou a revanche. Encerrando a sessão.")
+        if not r2:
+            j1.receber_mensagem(f"{j2.get_nome()} recusou a revanche. Encerrando a sessão.")
+
+        j1.finalizar()
+        j2.finalizar()
+        return False
+
     def _partida(self, uri1, uri2):
         # ==========================================
         # CONCORRÊNCIA DO PYRO5 (Ownership):
@@ -112,9 +128,9 @@ class ServidorJogo:
         j1 = Pyro5.api.Proxy(uri1)
         j2 = Pyro5.api.Proxy(uri2)
 
-        tab = Tabuleiro()
         # Mapeamento estático dos papéis de cada jogador
         jogadores = [(j1, "X"), (j2, "O")]
+        placar = {j1.get_nome(): 0, j2.get_nome(): 0}
 
         try:
             # Envia a mensagem de boas-vindas
@@ -123,89 +139,63 @@ class ServidorJogo:
                     f"\n--- A partida começou, {jogador.get_nome()}! Você joga com '{simbolo}' ---"
                 )
 
-            atual = 0  # Índice que alterna entre 0 e 1 para gerenciar o turno
-
-            # Loop principal do jogo
             while True:
-                jogador, simbolo = jogadores[atual]
-                outro_jogador, _ = jogadores[1 - atual]
+                tab = Tabuleiro()
+                atual = 0
 
-                # Atualiza a interface (CLI) de ambos os jogadores
-                jogador.receber_mensagem("\n" + tab.exibir())
-                outro_jogador.receber_mensagem("\n" + tab.exibir())
-                outro_jogador.receber_mensagem(
-                    f"Aguarde o turno do seu adversário ({jogador.get_nome()})..."
-                )
+                while True:
+                    jogador, simbolo = jogadores[atual]
+                    outro_jogador, _ = jogadores[1 - atual]
 
-                # --- PONTO DE SINCRONIZAÇÃO (RPC Bloqueante) ---
-                # A thread desta partida no servidor fica pausada (bloqueada)
-                # aguardando o retorno da tupla (linha, coluna) pelo cliente pela rede.
-                linha, coluna = jogador.fazer_jogada()
-
-                # Processa o lance usando a classe abstrata de regras
-                if tab.jogar(linha, coluna, simbolo):
-                    vencedor = tab.verificar_vencedor()
-
-                    if vencedor:
-                        vencedor_nome = (
-                            j1.get_nome() if vencedor == "X" else j2.get_nome()
-                        )
-                        msg = f"\n{tab.exibir()}\nFim de Jogo! {vencedor_nome} venceu!"
-                        j1.receber_mensagem(msg)
-                        j2.receber_mensagem(msg)
-
-                        r1 = j1.revanche()
-                        r2 = j2.revanche()
-
-                        if r1 and r2:
-                            tab = Tabuleiro()
-                            atual = 0
-                            continue
-                        else:
-                            if not r1:
-                                j2.receber_mensagem(
-                                    f"Jogador {j1.get_nome()} cancelou a revanche"
-                                )
-                            if not r2:
-                                j1.receber_mensagem(
-                                    f"Jogador {j2.get_nome()} cancelou a revanche"
-                                )
-                            j1.finalizar()
-                            j2.finalizar()
-                            break
-                    elif tab.completo():
-                        msg = f"\n{tab.exibir()}\nFim de Jogo! Empate!"
-                        j1.receber_mensagem(msg)
-                        j2.receber_mensagem(msg)
-
-                        r1 = j1.revanche()
-                        r2 = j2.revanche()
-
-                        if r1 and r2:
-                            tab = Tabuleiro()
-                            atual = 0
-                            continue
-                        else:
-                            if not r1:
-                                j2.receber_mensagem(
-                                    f"Jogador {j1.get_nome()} cancelou a revanche"
-                                )
-                            if not r2:
-                                j1.receber_mensagem(
-                                    f"Jogador {j2.get_nome()} cancelou a revanche"
-                                )
-                            j1.finalizar()
-                            j2.finalizar()
-                            break
-
-                    # Alterna o turno matematicamente (0 vira 1, 1 vira 0)
-                    atual = 1 - atual
-                else:
-                    # Se a jogada falhar (posição ocupada), o turno NÃO alterna.
-                    # O mesmo jogador será cobrado novamente no próximo ciclo do while.
-                    jogador.receber_mensagem(
-                        f"Jogada inválida, {jogador.get_nome()}! A posição pode estar ocupada ou fora dos limites."
+                    # Atualiza a interface (CLI) de ambos os jogadores
+                    jogador.receber_mensagem("\n" + tab.exibir())
+                    outro_jogador.receber_mensagem("\n" + tab.exibir())
+                    outro_jogador.receber_mensagem(
+                        f"Aguarde o turno do seu adversário ({jogador.get_nome()})..."
                     )
+
+                    # --- PONTO DE SINCRONIZAÇÃO (RPC Bloqueante) ---
+                    # A thread desta partida no servidor fica pausada (bloqueada)
+                    # aguardando o retorno da tupla (linha, coluna) pelo cliente pela rede.
+                    linha, coluna = jogador.fazer_jogada()
+
+                    # Processa o lance usando a classe abstrata de regras
+                    if tab.jogar(linha, coluna, simbolo):
+                        vencedor = tab.verificar_vencedor()
+
+                        if vencedor:
+                            vencedor_nome = (
+                                j1.get_nome() if vencedor == "X" else j2.get_nome()
+                            )
+                            placar[vencedor_nome] += 1
+                            msg = (
+                                f"\n{tab.exibir()}\nFim de Jogo! {vencedor_nome} venceu! "
+                                f"Placar atual: {j1.get_nome()} {placar[j1.get_nome()]} x {placar[j2.get_nome()]} {j2.get_nome()}"
+                            )
+                            j1.receber_mensagem(msg)
+                            j2.receber_mensagem(msg)
+
+                            if not self._processar_revanche(j1, j2):
+                                return
+                            break
+
+                        elif tab.completo():
+                            msg = (
+                                f"\n{tab.exibir()}\nFim de Jogo! Empate! "
+                                f"Placar atual: {j1.get_nome()} {placar[j1.get_nome()]} x {placar[j2.get_nome()]} {j2.get_nome()}"
+                            )
+                            j1.receber_mensagem(msg)
+                            j2.receber_mensagem(msg)
+
+                            if not self._processar_revanche(j1, j2):
+                                return
+                            break
+
+                        atual = 1 - atual
+                    else:
+                        jogador.receber_mensagem(
+                            f"Jogada inválida, {jogador.get_nome()}! A posição pode estar ocupada ou fora dos limites."
+                        )
 
         except Exception as e:
             # Tratamento de resiliência: se um cliente fechar o terminal abruptamente (Broken Pipe),

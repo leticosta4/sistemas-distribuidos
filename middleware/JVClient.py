@@ -37,13 +37,10 @@ class Jogador:
 
     def revanche(self):
         opcao = input(
-            "\n Deseja uma revanche com o adversário? Digite S para sim ou N para não"
-        )
+            "\nDeseja uma revanche com o adversário? Digite S para sim ou N para não: "
+        ).strip().upper()
 
-        if opcao == "S":
-            return True
-
-        return False
+        return opcao in ("S", "SIM", "Y", "YES")
 
     @Pyro5.api.oneway
     def finalizar(self):
