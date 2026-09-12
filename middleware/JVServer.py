@@ -2,8 +2,10 @@
 Created on Wed Sep  9 14:45:37 2026
 @author: massa
 """
+
 import Pyro5.api
 import threading
+
 
 # ==========================================
 # 1. ABSTRAÇÃO: LÓGICA DE ESTADO DO JOGO
@@ -33,16 +35,18 @@ class Tabuleiro:
         # Agrupamos todas as combinações possíveis de vitória para analisá-las de forma uniforme.
         # Isso evita dezenas de "if/else" repetitivos.
         linhas = self.tabuleiro
-        colunas = list(zip(*self.tabuleiro)) # Transposição da matriz (lê colunas como linhas)
+        colunas = list(
+            zip(*self.tabuleiro)
+        )  # Transposição da matriz (lê colunas como linhas)
         diagonais = [
             [self.tabuleiro[i][i] for i in range(3)],
-            [self.tabuleiro[i][2 - i] for i in range(3)]
+            [self.tabuleiro[i][2 - i] for i in range(3)],
         ]
 
         # Itera sobre todas as trilhas possíveis buscando uma onde os 3 elementos são iguais e não vazios
         for trio in linhas + colunas + diagonais:
             if trio[0] != " " and trio.count(trio[0]) == 3:
-                return trio[0] # Retorna "X" ou "O"
+                return trio[0]  # Retorna "X" ou "O"
         return None
 
     def completo(self):
@@ -53,7 +57,7 @@ class Tabuleiro:
 # ==========================================
 # 2. DECOMPOSIÇÃO: GERENCIAMENTO DE REDE
 # ==========================================
-# O decorador @expose diz ao middleware do Pyro que os métodos públicos desta 
+# O decorador @expose diz ao middleware do Pyro que os métodos públicos desta
 # classe estão liberados para serem acessados remotamente pelos clientes.
 @Pyro5.api.expose
 class ServidorJogo:
@@ -69,27 +73,32 @@ class ServidorJogo:
     def iniciar_jogo(self, jogador_uri, jogador_nome):
         # ==========================================
         # CONCORRÊNCIA DO PYRO5 (Ownership):
-        # Não instanciamos o Proxy() aqui na thread principal. 
-        # O Pyro amarra o Proxy à thread que o criou. Se criarmos aqui, 
+        # Não instanciamos o Proxy() aqui na thread principal.
+        # O Pyro amarra o Proxy à thread que o criou. Se criarmos aqui,
         # a thread da partida (que roda em background) não terá permissão para usá-lo.
         # Por isso, guardamos apenas a STRING (URI) na fila.
         # ==========================================
-        print(f"[REDE] Novo jogador conectado. URI: {jogador_uri} | Nome: {jogador_nome}")
-        
+        print(
+            f"[REDE] Novo jogador conectado. URI: {jogador_uri} | Nome: {jogador_nome}"
+        )
+
         # Seção Crítica: O Lock garante que apenas uma thread altere a fila por vez
         with self.lock:
             self.fila.append(jogador_uri)
-            
+
             # Algoritmo de emparelhamento: a cada 2 jogadores, retira da fila e inicia a partida
             if len(self.fila) >= 2:
                 uri1 = self.fila.pop(0)
                 uri2 = self.fila.pop(0)
-                print("[SISTEMA] 2 jogadores encontrados. Iniciando partida em nova thread...")
-                
+                print(
+                    "[SISTEMA] 2 jogadores encontrados. Iniciando partida em nova thread..."
+                )
+
                 # A partida roda em uma nova Thread, recebendo as URIs (Strings).
                 # daemon=True assegura que se o servidor cair, as threads filhas morrem.
-                threading.Thread(target=self._partida, args=(uri1, uri2), daemon=True).start()
-
+                threading.Thread(
+                    target=self._partida, args=(uri1, uri2), daemon=True
+                ).start()
 
     # ==========================================
     # 3. MÁQUINA DE ESTADOS DA PARTIDA
@@ -97,12 +106,12 @@ class ServidorJogo:
     def _partida(self, uri1, uri2):
         # ==========================================
         # CONCORRÊNCIA DO PYRO5 (Ownership):
-        # Os proxies são instanciados AQUI, dentro da thread que vai 
+        # Os proxies são instanciados AQUI, dentro da thread que vai
         # efetivamente usá-los para se comunicar com os clientes via RPC.
         # ==========================================
         j1 = Pyro5.api.Proxy(uri1)
         j2 = Pyro5.api.Proxy(uri2)
-        
+
         tab = Tabuleiro()
         # Mapeamento estático dos papéis de cada jogador
         jogadores = [(j1, "X"), (j2, "O")]
@@ -110,10 +119,12 @@ class ServidorJogo:
         try:
             # Envia a mensagem de boas-vindas
             for jogador, simbolo in jogadores:
-                jogador.receber_mensagem(f"\n--- A partida começou, {jogador.get_nome()}! Você joga com '{simbolo}' ---")
+                jogador.receber_mensagem(
+                    f"\n--- A partida começou, {jogador.get_nome()}! Você joga com '{simbolo}' ---"
+                )
 
-            atual = 0 # Índice que alterna entre 0 e 1 para gerenciar o turno
-            
+            atual = 0  # Índice que alterna entre 0 e 1 para gerenciar o turno
+
             # Loop principal do jogo
             while True:
                 jogador, simbolo = jogadores[atual]
@@ -122,72 +133,120 @@ class ServidorJogo:
                 # Atualiza a interface (CLI) de ambos os jogadores
                 jogador.receber_mensagem("\n" + tab.exibir())
                 outro_jogador.receber_mensagem("\n" + tab.exibir())
-                outro_jogador.receber_mensagem(f"Aguarde o turno do seu adversário ({jogador.get_nome()})...")
+                outro_jogador.receber_mensagem(
+                    f"Aguarde o turno do seu adversário ({jogador.get_nome()})..."
+                )
 
                 # --- PONTO DE SINCRONIZAÇÃO (RPC Bloqueante) ---
-                # A thread desta partida no servidor fica pausada (bloqueada) 
+                # A thread desta partida no servidor fica pausada (bloqueada)
                 # aguardando o retorno da tupla (linha, coluna) pelo cliente pela rede.
                 linha, coluna = jogador.fazer_jogada()
 
                 # Processa o lance usando a classe abstrata de regras
                 if tab.jogar(linha, coluna, simbolo):
                     vencedor = tab.verificar_vencedor()
-                    
+
                     if vencedor:
-                        vencedor_nome = j1.get_nome() if vencedor == "X" else j2.get_nome()
+                        vencedor_nome = (
+                            j1.get_nome() if vencedor == "X" else j2.get_nome()
+                        )
                         msg = f"\n{tab.exibir()}\nFim de Jogo! {vencedor_nome} venceu!"
                         j1.receber_mensagem(msg)
                         j2.receber_mensagem(msg)
-                        j1.finalizar() # Sinaliza ao cliente que ele pode encerrar seu terminal
-                        j2.finalizar()
-                        break
+
+                        r1 = j1.revanche()
+                        r2 = j2.revanche()
+
+                        if r1 and r2:
+                            tab = Tabuleiro()
+                            atual = 0
+                            continue
+                        else:
+                            if not r1:
+                                j2.receber_mensagem(
+                                    f"Jogador {j1.get_nome()} cancelou a revanche"
+                                )
+                            if not r2:
+                                j1.receber_mensagem(
+                                    f"Jogador {j2.get_nome()} cancelou a revanche"
+                                )
+                            j1.finalizar()
+                            j2.finalizar()
+                            break
                     elif tab.completo():
                         msg = f"\n{tab.exibir()}\nFim de Jogo! Empate!"
                         j1.receber_mensagem(msg)
                         j2.receber_mensagem(msg)
-                        j1.finalizar()
-                        j2.finalizar()
-                        break
-                        
+
+                        r1 = j1.revanche()
+                        r2 = j2.revanche()
+
+                        if r1 and r2:
+                            tab = Tabuleiro()
+                            atual = 0
+                            continue
+                        else:
+                            if not r1:
+                                j2.receber_mensagem(
+                                    f"Jogador {j1.get_nome()} cancelou a revanche"
+                                )
+                            if not r2:
+                                j1.receber_mensagem(
+                                    f"Jogador {j2.get_nome()} cancelou a revanche"
+                                )
+                            j1.finalizar()
+                            j2.finalizar()
+                            break
+
                     # Alterna o turno matematicamente (0 vira 1, 1 vira 0)
                     atual = 1 - atual
                 else:
                     # Se a jogada falhar (posição ocupada), o turno NÃO alterna.
                     # O mesmo jogador será cobrado novamente no próximo ciclo do while.
-                    jogador.receber_mensagem(f"Jogada inválida, {jogador.get_nome()}! A posição pode estar ocupada ou fora dos limites.")
-                    
+                    jogador.receber_mensagem(
+                        f"Jogada inválida, {jogador.get_nome()}! A posição pode estar ocupada ou fora dos limites."
+                    )
+
         except Exception as e:
             # Tratamento de resiliência: se um cliente fechar o terminal abruptamente (Broken Pipe),
             # capturamos o erro na rede e avisamos o jogador restante antes de matar a thread.
             print(f"[ERRO] Partida interrompida (Erro ou Desconexão): {e}")
-            try: j1.finalizar() 
-            except: pass
-            try: j2.finalizar()
-            except: pass
+            try:
+                j1.finalizar()
+            except:
+                pass
+            try:
+                j2.finalizar()
+            except:
+                pass
+
 
 def main():
     # Inicialização do middleware RPC
     daemon = Pyro5.api.Daemon()
     ns = Pyro5.api.locate_ns()
-    
+
     # ==========================================
     # ARQUITETURA: PADRÃO SINGLETON (Instância Única)
     # ==========================================
     # 1. Instanciamos o objeto AQUI. O __init__() é executado neste exato momento,
     # criando a self.fila que será compartilhada (em memória) por todos os clientes.
     instancia_servidor = ServidorJogo()
-    
+
     # 2. Registramos a INSTÂNCIA já criada no Pyro.
     # O Pyro usará este mesmo objeto para todas as chamadas.
     uri = daemon.register(instancia_servidor)
-    
+
     # Registra a URI no Servidor de Nomes global para os clientes localizarem
     ns.register("jogodavelha.servidor", uri)
-    
-    print("[SISTEMA] Servidor de Jogo da Velha registrado no Name Server e aguardando jogadores...")
-    
+
+    print(
+        "[SISTEMA] Servidor de Jogo da Velha registrado no Name Server e aguardando jogadores..."
+    )
+
     # Inicia o loop de escuta (A thread principal fica bloqueada aqui mantendo o servidor vivo)
     daemon.requestLoop()
+
 
 if __name__ == "__main__":
     main()
