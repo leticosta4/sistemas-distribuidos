@@ -68,7 +68,29 @@ class ServidorJogo:
         # Mutex (Lock) necessário para evitar condições de corrida (Race Conditions)
         # caso dezenas de clientes tentem se conectar no exato mesmo milissegundo.
         self.lock = threading.Lock()
+        # guarda quem tá jogando com quem (uri -> uri do parceiro)
+        self.partidas_ativas = {}
         print("[SISTEMA] Estrutura de dados do servidor iniciada.")
+
+    def jogador_desconectou(self, jogador_uri):
+        # cliente chama isso no CTRL+C antes de fechar
+        with self.lock:
+            info = self.partidas_ativas.pop(jogador_uri, None)
+            if info is None:
+                return  # partida já tinha acabado, ignora
+            parceiro_uri = info["parceiro_uri"]
+            self.partidas_ativas.pop(parceiro_uri, None)
+
+        try:
+            parceiro = Pyro5.api.Proxy(parceiro_uri)
+            parceiro.receber_mensagem(
+                "Oponente desconectado. Você venceu por W.O."
+            )
+            parceiro.finalizar()
+        except Exception:
+            pass  # parceiro já caiu também, de boa
+
+        print(f"[SISTEMA] {jogador_uri} saiu. W.O. pro oponente.")
 
     def iniciar_jogo(self, jogador_uri, jogador_nome):
         # ==========================================
@@ -127,6 +149,11 @@ class ServidorJogo:
         # ==========================================
         j1 = Pyro5.api.Proxy(uri1)
         j2 = Pyro5.api.Proxy(uri2)
+
+        # registra os dois na memória do servidor enquanto a partida roda
+        with self.lock:
+            self.partidas_ativas[uri1] = {"parceiro_uri": uri2}
+            self.partidas_ativas[uri2] = {"parceiro_uri": uri1}
 
         # Mapeamento estático dos papéis de cada jogador
         jogadores = [(j1, "X"), (j2, "O")]
@@ -198,17 +225,34 @@ class ServidorJogo:
                         )
 
         except Exception as e:
-            # Tratamento de resiliência: se um cliente fechar o terminal abruptamente (Broken Pipe),
-            # capturamos o erro na rede e avisamos o jogador restante antes de matar a thread.
-            print(f"[ERRO] Partida interrompida (Erro ou Desconexão): {e}")
-            try:
-                j1.finalizar()
-            except:
-                pass
-            try:
-                j2.finalizar()
-            except:
-                pass
+            # caiu a conexão no meio de um RPC (rede caiu, processo morreu, etc.)
+            print(f"[ERRO] Partida interrompida (desconexão): {e}")
+
+            with self.lock:
+                ainda_ativa = (
+                    uri1 in self.partidas_ativas or uri2 in self.partidas_ativas
+                )
+                if ainda_ativa:
+                    self.partidas_ativas.pop(uri1, None)
+                    self.partidas_ativas.pop(uri2, None)
+
+            if ainda_ativa:
+                # tenta avisar os dois; quem caiu vai dar erro e a gente ignora
+                for jogador in (j1, j2):
+                    try:
+                        jogador.receber_mensagem(
+                            "Oponente desconectado. Você venceu por W.O."
+                        )
+                        jogador.finalizar()
+                    except Exception:
+                        pass
+
+        finally:
+            # limpa o registro pra não acumular lixo na memória
+            with self.lock:
+                self.partidas_ativas.pop(uri1, None)
+                self.partidas_ativas.pop(uri2, None)
+            print("[SISTEMA] Partida encerrada. Thread liberada.")
 
 
 def main():

@@ -132,6 +132,11 @@ def main():
     except KeyboardInterrupt:
         # Captura CTRL+C garantindo que o programa feche sem estourar Tracebacks feios.
         print("\nDesconectado pelo jogador.")
+        try:
+            servidor.jogador_desconectou(str(jogador_uri))
+        except Exception:
+            pass
+        jogador.finalizar()
 
 
 if __name__ == "__main__":
