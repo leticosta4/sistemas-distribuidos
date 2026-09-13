@@ -1,8 +1,6 @@
 """
-Created on Wed Sep  9 14:45:37 2026
-@author: massa
+alunas: Letícia Almeida e Sophia Lima
 """
-
 import Pyro5.api
 import threading
 

@@ -1,5 +1,9 @@
 # Relatório Técnico
 
+> 
+> Alunas: Letícia Almeida e Sophia Lima
+>
+
 ### A.1) Explique a importância e o funcionamento da linha instancia_servidor = ServidorJogo() na função main() do servidor, contrastando com o registro direto da classe. O que aconteceria (em termos de gerência de estado) se registrássemos a classe diretamente no Daemon, sem instanciá-la?
 
 A instância do objeto servidor é o que permite a existência do mesmo e funcionamento do projeto inicialmente, criando também uma fila a ser compartilhada pelos clientes - esse memso objeto será usado pelo Pyro para todas as chamadas remotas. 
