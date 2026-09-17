@@ -4,5 +4,6 @@ version = "0.1.0"
 description = "Mini projetos de Sistemas Distribuidos - UNEB"
 requires-python = ">=3.10"
 dependencies = [
+    "numpy>=2.2.6",
     "pyro5>=5.17",
 ]
