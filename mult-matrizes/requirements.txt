@@ -1,0 +1,6 @@
+# Dependencias do mult-matrizes
+#
+# sincrono/ e assincrono/ usam apenas a biblioteca padrao (socket, threading, json...).
+# A unica dependencia externa e o rpyc, usado pela pasta middleware/.
+
+rpyc>=6.0.2

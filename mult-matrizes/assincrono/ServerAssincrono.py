@@ -3,25 +3,31 @@ import json
 import sys
 import time
 import random
+from datetime import datetime
 
 HOST = "localhost"
-# cada processo trabalhador roda em uma porta diferente:
-#   python3 ServerAssincrono.py 8001
-#   python3 ServerAssincrono.py 8002
-PORTA = int(sys.argv[1]) if len(sys.argv) > 1 else 8001
+PORTA_INICIAL = 8001
+PORTA_FINAL = 8010
 
-# atraso aleatorio por tarefa (segundos). Simula trabalhadores com
-# velocidades diferentes, como numa rede de verdade. Assim as respostas
-# chegam fora de ordem e da para ver o coordenador coletando conforme chegam.
-# Ponha 0 para desativar.
-DELAY_MAX = 0.3
+DELAY_MAX = 1.0
+
+PORTA = PORTA_INICIAL
+
+
+def agora():
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
+def candidatas_para_porta():
+    if len(sys.argv) > 1:
+        return [int(sys.argv[1])]
+    return list(range(PORTA_INICIAL, PORTA_FINAL + 1))
 
 
 def receber_msg(conexao):
-    # protocolo cru: cada mensagem JSON termina com \n
     dados = b""
     while True:
-        parte = conexao.recv(1024)
+        parte = conexao.recv(4096)
         if not parte:
             return None
         dados = dados + parte
@@ -37,7 +43,6 @@ def enviar_msg(conexao, obj):
 
 
 def produto_escalar(linha, coluna):
-    # calculo cru, iterando com [] e indices, sem numpy
     produto = 0
     for k in range(len(linha)):
         produto = produto + (linha[k] * coluna[k])
@@ -45,10 +50,24 @@ def produto_escalar(linha, coluna):
 
 
 def main():
+    global PORTA
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    servidor.bind((HOST, PORTA))
+    servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    for porta in candidatas_para_porta():
+        try:
+            servidor.bind((HOST, porta))
+            PORTA = porta
+            break
+        except OSError:
+            print("[" + agora() + "] [TRABALHADOR] Porta " + str(porta) + " ocupada, tentando proxima...", flush=True)
+    else:
+        print("[" + agora() + "] [TRABALHADOR] Nenhuma porta livre em " + str(PORTA_INICIAL) + "-" + str(PORTA_FINAL) + ".", flush=True)
+        servidor.close()
+        return
+
     servidor.listen()
-    print("[TRABALHADOR " + str(PORTA) + "] Aguardando coordenador em " + HOST + ":" + str(PORTA) + "...", flush=True)
+    print("[" + agora() + "] [TRABALHADOR " + str(PORTA) + "] Aguardando coordenador em " + HOST + ":" + str(PORTA) + "...", flush=True)
 
     conexao = None
     try:
@@ -61,9 +80,8 @@ def main():
                 if pedido is None:
                     break
 
-                # sinal de fim enviado pelo coordenador
                 if "fim" in pedido:
-                    print("[TRABALHADOR " + str(PORTA) + "] Fim das tarefas. Encerrando conexao.\n", flush=True)
+                    print("[" + agora() + "] [TRABALHADOR " + str(PORTA) + "] Fim das tarefas. Encerrando conexao.\n", flush=True)
                     break
 
                 linha = pedido["linha"]
@@ -75,18 +93,17 @@ def main():
                     time.sleep(random.uniform(0, DELAY_MAX))
 
                 resultado = produto_escalar(linha, coluna)
-                print("[TRABALHADOR " + str(PORTA) + "] Celula [" + str(i) + "][" + str(j) + "] linha=" + str(linha) + " coluna=" + str(coluna) + " = " + str(resultado) + "\n", flush=True)
+                print("[" + agora() + "] [TRABALHADOR " + str(PORTA) + "] Celula [" + str(i) + "][" + str(j) + "] = " + str(resultado) + " (tarefa " + str(tarefas + 1) + ")\n", flush=True)
                 tarefas = tarefas + 1
 
                 enviar_msg(conexao, {"i": i, "j": j, "resultado": resultado})
 
             conexao.close()
             conexao = None
-            # conexao de teste (probe) fecha sem mandar tarefa: nao polui o log
             if tarefas > 0:
-                print("[TRABALHADOR " + str(PORTA) + "] Conexao encerrada. Aguardando proximo coordenador...\n", flush=True)
+                print("[" + agora() + "] [TRABALHADOR " + str(PORTA) + "] Conexao encerrada. " + str(tarefas) + " tarefas. Aguardando proximo coordenador...\n", flush=True)
     except KeyboardInterrupt:
-        print("\n[TRABALHADOR " + str(PORTA) + "] Encerrado pelo usuario.", flush=True)
+        print("\n[" + agora() + "] [TRABALHADOR " + str(PORTA) + "] Encerrado pelo usuario.", flush=True)
     finally:
         if conexao is not None:
             try:
@@ -100,4 +117,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[TRABALHADOR " + str(PORTA) + "] Encerrado pelo usuario.", flush=True)
+        print("\n[" + agora() + "] [TRABALHADOR " + str(PORTA) + "] Encerrado pelo usuario.", flush=True)
