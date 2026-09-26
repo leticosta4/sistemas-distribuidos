@@ -4,16 +4,16 @@ Abordagem com **middleware rpyc** (RPC). Cada trabalhador expõe um serviço `Tr
 
 ## Preparando o ambiente (1x)
 
-Esta é a única pasta que depende de uma biblioteca externa (`rpyc`), que já vem no `requirements.txt`.
+Esta é a única pasta de `mult-matrizes` que depende de uma biblioteca externa (`rpyc`). O `requirements.txt` fica na **raiz do repositório**, junto com as demais dependências:
 
 ```bash
-# na pasta mult-matrizes/ (onde está o requirements.txt)
+# na raiz do repositorio (onde está o requirements.txt)
 python3 -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Se o venv não for criado, o `python` do sistema não vai ter o `rpyc` instalado.
+Se o `.venv` não estiver ativado, o `python` do sistema não vai ter o `rpyc` instalado.
 
 ## Como rodar (sem passar nada)
 

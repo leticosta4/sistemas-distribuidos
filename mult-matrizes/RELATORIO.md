@@ -6,11 +6,13 @@
 
 ```
 mult-matrizes/
-├── requirements.txt
 ├── sincrono/        ServerSincrono.py, ClienteSincrono.py
 ├── assincrono/      ServerAssincrono.py, ClienteAssincrono.py
 └── middleware/      TrabalhadorMiddleware.py, ClienteMiddleware.py
 ```
+
+A única dependência externa do projeto é o `rpyc` (pasta `middleware/`), declarado no
+`requirements.txt` da raiz do repositório.
 
 ## 1. Arquitetura implementada (mestre/escravo)
 

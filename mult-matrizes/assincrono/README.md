@@ -4,10 +4,10 @@ Abordagem **assíncrona** com sockets TCP: o coordenador cria **uma thread por t
 
 ## Preparando o ambiente (1x)
 
-Esta pasta usa apenas a **biblioteca padrão do Python**, então o ambiente é opcional (mas segue o mesmo padrão das outras pastas).
+Esta pasta usa apenas a **biblioteca padrão do Python**, então basta ter o ambiente da raiz do repositório ativado:
 
 ```bash
-# na pasta mult-matrizes/ (onde está o requirements.txt)
+# na raiz do repositorio (onde está o requirements.txt)
 python3 -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
