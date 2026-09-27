@@ -81,6 +81,17 @@ python mult-matrizes/middleware/ClienteMiddleware.py
 Detalhes de execução e exemplos de saída em [síncrono](mult-matrizes/sincrono/README.md),
 [assíncrono](mult-matrizes/assincrono/README.md) e [middleware](mult-matrizes/middleware/README.md).
 
+
+### PubSub 
+
+Como rodar:
+```bash
+python -m Pyro5.nameserver
+python pubsub/intermediario.py
+python pubsub/subscriber.py #digite id e topicos de interesse para acompanhar
+python pubsub/publisher.py #digite id e topico a ser publicado com uma msg
+```
+
 ## Adicionando um novo projeto
 
 1. Crie uma pasta para o projeto
