@@ -8,10 +8,12 @@
 
 O sistema segue o modelo Pub/Sub clássico com comunicação indireta: publisher e subscriber nunca se conectam diretamente, tudo passa pelo intermediário.
 
+```mermaid
 graph LR
     P[Publisher] -->|publicar| I[Intermediário<br/>Tópicos / Inscrições]
     S[Subscriber] -->|registrar_subscriber<br/>inscrever| I
     I -->|receber_msg| S
+```
 
 
 Todos os 3 processos são objetos Pyro5, registrados no Name Server (NS). Cada processo se registra no NS com um nome lógico (`"intermediario"`, `"subscriber.S1"`, etc) e quem precisa falar com ele consulta o NS pra achar a URI atual, sem precisar saber IP/porta de ninguém na mão.
