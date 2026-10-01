@@ -2,7 +2,7 @@
 #
 # server-client-basico/ e mult-matrizes/{sincrono,assincrono}/ usam apenas a
 # biblioteca padrao (socket, threading, json...). As unicas dependencias
-# externas sao o Pyro5 (middleware/) e o rpyc (mult-matrizes/middleware/).
+# externas sao o Pyro5 (middleware/ e pubsub/) e o rpyc (mult-matrizes/middleware/).
 
 Pyro5>=5.17
 rpyc>=6.0.2
