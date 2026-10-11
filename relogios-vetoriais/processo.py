@@ -1,44 +1,11 @@
 """
-processo.py
-===========
+código de cada processo do sistema distribuído.
 
-Processo distribuido P_i do sistema de monitoring de eventos com RELOGIOS
-VETORIAIS (trabalho da disciplina de Sistemas Distribuidos - UNEB).
-
-Cada processo executado por este script e um processo INDEPENDENTE (um
-processo de SO distinto, iniciado pelo `executar.py` ou manualmente) que:
-
-  1. registra um objeto Pyro5 no Servidor de Nomes, com nome "processo.Pi";
-  2. gera EVENTOS LOCAIS em intervalos ALEATORIOS (thread `loop_geracao`);
-  3. a cada evento local:
-        - incrementa o proprio relogio vetorial        (regra C1);
-        - grava o evento no log local;
-        - envia o relogio aos demais processos, com um ATRASO SIMULADO
-          (time.sleep) diferente e em ORDEM EMBARALHADA para cada destinatario
-          (a defasagem acontece SEM segurar nenhum bloqueio, portanto o
-          recebimento de mensagens nunca fica bloqueado pelo envio);
-  4. ao receber uma mensagem (metodo `receber_evento`, executado nas threads
-     do pool do Pyro5):
-        - atualiza o relogio vetorial                 (regras C3);
-        - grava a ENTRADA no log local;
-        - faz a ANALISE causal: compara o evento recebido com os eventos
-          locais e com os ja recebidos, apontando CONCORRENCIAS e CASOS em
-          que a ordem de CHEGADA divergiu da ordem CAUSAL.
-
-Estrutura de threads de um processo:
-
-    thread principal ..... daemon.requestLoop()  -> recebe mensagens Pyro5
-    thread "gerador" ..... gera eventos + envia com atrasos aleatorios
-    (threads do Pyro5 ... chamam `receber_evento` concorrentemente)
-
-Todo acesso ao relogio e ao arquivo de log e protegido por `self.bloqueio`,
-justamente porque esses tres atores (principal, gerador, pool do Pyro5)
-tocam no mesmo estado.  O bloqueio NUNCA e mantido durante um time.sleep()
-ou durante uma chamada RPC.
-
-Uso:
-    python processo.py --id P1
-    python processo.py --id P2 --duracao 30 --n 4
+aqui cada processo:
+- se cadastra no servidor de nomes do pyro5;
+- fica gerando eventos locais em momentos aleatórios;
+- manda esses eventos pros outros processos com delays e ordem bagunçada;
+- escuta as mensagens dos outros nós e atualiza o relógio vetorial.
 """
 
 from __future__ import annotations
@@ -54,9 +21,7 @@ from Pyro5.errors import NamingError
 
 from relogio_vetorial import RelogioVetorial
 
-# Descricoes possiveis para um evento local (coisa que o processo "fez").
-# O trabalho pede que o evento represente algo concreto: conclusao de tarefa,
-# alteracao de estado, operacao local...
+# lista com algumas ações fictícias pros eventos locais
 ACOES = [
     "tarefa concluida",
     "estado alterado",
@@ -69,69 +34,46 @@ ACOES = [
 ]
 
 
-# ====================================================================== #
-# 1. LOG                                                                 #
-# ====================================================================== #
 class Registro:
-    """
-    Log do processo: cada linha e gravada AO MESMO TEMPO no console e em um
-    arquivo `logs/Pi.log` (um arquivo por processo), para que seja possivel
-    acompanhar a evolucao dos relogios durante a execucao e depois anexar
-    exemplos no relatorio.
-
-    IMPORTANTE: todas as chamadas a `linha()` devem ser feitas com
-    `Processo.bloqueio` segurado, para que duas threads nao intercalem
-    caracteres de linhas diferentes.
-    """
-
+    # grava os logs no console e no arquivo .log ao mesmo tempo
     def __init__(self, id_processo: str, caminho: Path) -> None:
         self.id = id_processo
         caminho.parent.mkdir(parents=True, exist_ok=True)
-        # modo "w": cada execucao comeca um log novo (mais facil de apresentar
-        # como exemplo de saida do que ir concatenando execucoes antigas).
+        # limpa/cria o arquivo do zero a cada execução
         self.arquivo = open(caminho, "w", encoding="utf-8")
         self.t0 = time.time()
         self.caminho = caminho
 
     def linha(self, tipo: str, detalhe: str, vc) -> None:
-        """Escreve uma linha padronizada: [tempo] Pi | TIPO | detalhe | VC=..."""
+        # monta a linha padronizada com tempo relativo desde o início
         texto = (
             f"[{time.time() - self.t0:8.3f}] {self.id:<3} | {tipo:<12} | "
             f"{detalhe:<62} | VC={vc}"
         )
         print(texto, flush=True)
         self.arquivo.write(texto + "\n")
-        self.arquivo.flush()  # o log esta sempre completo, mesmo com Ctrl+C
+        self.arquivo.flush()
 
     def fechar(self) -> None:
         self.arquivo.close()
 
 
-# ====================================================================== #
-# 2. PROCESSO                                                            #
-# ====================================================================== #
 @Pyro5.api.expose
 class Processo:
-    """
-    Objeto registrado no Pyro5.  O metodo `receber_evento` e o unico exposto
-    aos demais processos (o decorador @expose torna publicos os metodos
-    nao-privados da classe, por isso o restante usa prefixo "_").
-    """
-
+    # classe do processo que fica exposta no pyro5 pros outros nós chamarem
     def __init__(self, id_processo: str, n: int, duracao: float, caminho_log: Path) -> None:
         self.id = id_processo
         self.n = n
         self.duracao = duracao
-        self.dreno = 3.0  # segundos extras de vida para receber atrasados
+        self.dreno = 3.0  # tempo extra pra esperar mensagens que ainda tão em trânsito
 
-        # --- estado protegido por `self.bloqueio` ---------------------- #
+        # lock pra proteger o relógio e as listas de acessos concorrentes entre threads
         self.bloqueio = threading.Lock()
         self.relogio = RelogioVetorial(id_processo, n)
-        self.seq_local = 0          # numero do proximo evento local (e1, e2...)
-        self.seq_recebido = 0       # numero do proximo recebimento (r1, r2...)
-        self.historico = []         # [(rotulo, vc)] TODOS os eventos ja vistos
-        self.recebidos = []         # [(rotulo, vc)] apenas os vindos de fora,
-                                    # ja com a ordem de chegada implicita
+        self.seq_local = 0          # contador de eventos gerados aqui (e1, e2...)
+        self.seq_recebido = 0       # contador de mensagens recebidas (r1, r2...)
+        self.historico = []         # guarda todos os eventos pra gente analisar causalidade
+        self.recebidos = []         # apenas eventos que vieram dos outros processos
         self.stats = {
             "eventos_locais": 0,
             "envios_ok": 0,
@@ -140,37 +82,22 @@ class Processo:
             "concorrencias": 0,
             "inversoes_chegada": 0,
         }
-        # --------------------------------------------------------------- #
 
-        self.tempo_inicio = time.time()   # ajustado em `iniciar()` (main)
-        self.parar = threading.Event()    # sinaliza fim da geracao de eventos
-        self.uris_pares = {}              # {id: uri} descobertas no nameserver
-        self.proxies = {}                 # {id: Proxy} criados NA thread geradora
+        self.tempo_inicio = time.time()
+        self.parar = threading.Event()
+        self.uris_pares = {}              # uris encontradas no nameserver {id: uri}
+        self.proxies = {}                 # proxies do pyro criados sob demanda {id: Proxy}
         self.rng = random.Random(f"{id_processo}-{time.time()}")
 
         self.registro = Registro(id_processo, caminho_log)
 
-    # ------------------------------------------------------------------ #
-    # Log (sempre com o bloqueio segurado pelo chamador)                  #
-    # ------------------------------------------------------------------ #
     def _registrar(self, tipo: str, detalhe: str, vc) -> None:
         self.registro.linha(tipo, detalhe, vc)
 
-    # ------------------------------------------------------------------ #
-    # RPC: recebimento de uma mensagem vinda de outro processo            #
-    # ------------------------------------------------------------------ #
     def receber_evento(self, origem: str, seq_origem: int, vc_msg: list, descricao: str) -> str:
-        """
-        Chamado remotamente pelo processo `origem` quando ele gera um evento.
-
-        Executa (C3) atualizacao do relogio, registra a ENTRADA no log e faz
-        a analise causal.  Roda nas threads do pool do Pyro5, portanto pode
-        ser chamado concorrentemente com a thread geradora: por isso o
-        bloqueio.  O corpo inteiro e curto e nunca dorme, entao o custo de
-        serializar o acesso e desprezivel.
-        """
+        # método chamado via rpc quando outro processo manda mensagem
         with self.bloqueio:
-            # (C3) incorpora o vetor do remetente e incrementa o proprio.
+            # regra C3: faz o merge dos vetores e soma 1 no relógio local
             vc_antes, vc_depois = self.relogio.receber(vc_msg)
 
             self.seq_recebido += 1
@@ -185,43 +112,22 @@ class Processo:
                 vc_depois,
             )
 
-            # ---- ANALISE CAUSAL (a parte principal da demonstracao) ---- #
+            # checa se o evento recebido é concorrente ou se chegou com inversão causal
             notas, concorrencias, inversoes = self._analisar(vc_msg)
             self.stats["concorrencias"] += concorrencias
             self.stats["inversoes_chegada"] += inversoes
             self._registrar("ANALISE", notas, vc_depois)
 
-        # a resposta vai para o chamador; nao precisa ser feita sob bloqueio.
         return f"{self.id} registrou {rotulo}"
 
     def _analisar(self, vc_msg: list) -> tuple:
-        """
-        Compara o evento recem-chegado (`vc_msg`) com o que este processo ja
-        conhece e devolve:
-
-          - notas:     texto para a linha ANALISE do log;
-          - concorrencias: quantidade de eventos incomparaveis detectados;
-          - inversoes: quantidade de eventos que chegaram DEPOIS de um
-                       posterior a eles na ordem causal.
-
-        Dois tipos de observacao sao geradas:
-
-        (a) CONCORRENCIA: existe um evento anterior cujo vetor e incomparavel
-            com o do evento recebido -- nenhum causou o outro.  Esse tipo de
-            relacao NAO e observavel apenas olhando a ordem de chegada.
-
-        (b) INVERSAO DE CHEGADA: um evento `x` recem-chegado tem vetor
-            estritamente MENOR que o de um evento `y` que ja tinha chegado,
-            ou seja, `x -> y` (x causou y) porem `y` chegou primeiro.  E a
-            prova, dentro dos logs, de que a ordem fisica das mensagens nao
-            e a ordem causal.
-        """
+        # compara o vetor recebido com os que a gente já conhece
         concorrentes = [
             rot
             for rot, vc in self.historico
             if RelogioVetorial.sao_concorrentes(vc, vc_msg)
         ]
-        # x chegou agora e y chegou antes, mas x -> y: ordem de chegada invertida.
+        # se o evento recém-chegado aconteceu antes de um que já tinha chegado, inverteu a ordem
         invertidos = [
             rot
             for rot, vc in self.recebidos
@@ -244,36 +150,20 @@ class Processo:
             len(invertidos),
         )
 
-    # ------------------------------------------------------------------ #
-    # Thread geradora: eventos locais + disseminacao com atrasos          #
-    # ------------------------------------------------------------------ #
     def iniciar_geracao(self) -> threading.Thread:
-        """Cria e sobret a thread que gera eventos (chamado pelo main)."""
+        # inicia a thread que vai ficar gerando e enviando os eventos locais
         t = threading.Thread(target=self._loop_geracao, name="gerador", daemon=True)
         t.start()
         return t
 
     def _loop_geracao(self) -> None:
-        """
-        Fica gerando eventos em intervalos aleatorios ate acabar a duracao
-        da execucao.  Cada volta:
-
-            dorme um intervalo aleatorio (sem bloqueio nenhum)
-            -> evento local: incrementa o relogio e grava no log
-            -> dissemina aos pares em ordem embaralhada, dormindo um atraso
-               aleatorio ANTES de cada envio (defasagem pedida no trabalho)
-
-        As dormidas acontecem SEM o bloqueio, de modo que as mensagens que
-        chegam sao processadas normalmente enquanto este processo esta no
-        meio de um atraso de envio.
-        """
-        # Espera os pares terminarem de ser descobertos (o main faz isso
-        # antes de chamar iniciar_geracao; aqui e so uma garantia).
+        # loop que sorteia intervalos aleatórios e vai gerando eventos
+        # espera achar os outros processos antes de começar a disparar
         while not self.uris_pares and not self.parar.is_set():
             time.sleep(0.05)
 
         while not self.parar.is_set():
-            intervalo = self.rng.uniform(0.4, 1.8)  # instante aleatorio
+            intervalo = self.rng.uniform(0.4, 1.8)  # dorme um intervalo aleatório
             if self.parar.wait(intervalo):
                 break
             if time.time() >= self.tempo_inicio + self.duracao:
@@ -281,8 +171,7 @@ class Processo:
             self._gerar_evento()
 
     def _gerar_evento(self) -> None:
-        """Gera um evento local (C1) e o envia a todos os pares."""
-        # ---------------- evento local (C1) ---------------- #
+        # gera um evento local (C1) e dispara pros outros nós
         with self.bloqueio:
             vc = self.relogio.incrementar()
             self.seq_local += 1
@@ -293,49 +182,31 @@ class Processo:
             self.historico.append((f"e{seq}", list(vc)))
             self._registrar("EVENTO_LOCAL", descricao, vc)
 
-        # ---------------- disseminacao ---------------- #
+        # faz os envios fora do lock pra não travar mensagens que tão chegando
         self._disseminar(seq, descricao, vc)
 
     def _disseminar(self, seq: int, descricao: str, vc: list) -> None:
-        """
-        Envia o evento para todos os pares.
-
-        Pontos obrigatorios do trabalho atendidos aqui:
-
-        * ORDEM DIFERENTE POR DESTINATARIO: os pares sao embaralhados a cada
-          evento (`rng.shuffle`), entao P2 pode receber o evento e1 antes de
-          P3, e no evento seguinte a ordem pode inverter.
-        * ATRASO SIMULADO: `time.sleep(atraso)` entre um envio e o outro,
-          com atraso aleatorio.  E esse atraso que faz as mensagens de um
-          mesmo processo chegarem aos destinos em ordens distintas.
-        * As mensagens sao FEITAS AQUI; o recebimento e tratado pelo
-          `daemon.requestLoop()` na thread principal, ou seja, o atraso de
-          envio nao trava o tratamento de mensagens recebidas.
-        * Nenhuma dessas operacoes segura `self.bloqueio` (nem o sleep, nem a
-          RPC), entao os eventos recebidos continuam sendo processados.
-        """
+        # manda o evento pra todos os outros processos
         destinos = [p for p in self.uris_pares]
         if not destinos:
             return
-        self.rng.shuffle(destinos)  # ordem de envio aleatoria a cada evento
+        self.rng.shuffle(destinos)  # embaralha a lista pra mandar em ordem diferente a cada vez
 
         for destino in destinos:
-            atraso = self.rng.uniform(0.02, 0.20)  # defasagem simulada
-            time.sleep(atraso)                     # SEM bloqueio algum
+            atraso = self.rng.uniform(0.02, 0.20)  # delay aleatório pra simular atraso de rede
+            time.sleep(atraso)                     # feito sem segurar lock
             try:
                 proxy = self._proxy_de(destino)
                 proxy.receber_evento(self.id, seq, list(vc), descricao)
                 status = "entregue"
                 ok = True
-            except Exception as exc:  # peer ainda nao subiu / caiu no meio
+            except Exception as exc:
                 status = f"FALHOU ({type(exc).__name__})"
                 ok = False
 
             with self.bloqueio:
                 self.stats["envios_ok" if ok else "envios_falha"] += 1
-                # O ENVIO NAO incrementa de novo o relogio: o evento ja foi
-                # incrementado uma unica vez em _gerar_evento, e as tres
-                # copias da mensagem carregam o MESMO vetor (broadcast causal).
+                # o envio carrega o mesmo vetor gerado no evento local
                 self._registrar(
                     "ENVIO",
                     f"e{seq} -> {destino:<3} | atraso {atraso:.3f}s | {status}",
@@ -343,28 +214,17 @@ class Processo:
                 )
 
     def _proxy_de(self, destino: str) -> Pyro5.api.Proxy:
-        """
-        Retorna o proxy Pyro5 de um par, criand-o SOB NECESSIDADE.
-
-        Um objeto Proxy do Pyro5 pertence a thread que o utiliza (se outra
-        thread usar, ocorre o erro "the calling thread is not the owner of
-        the proxy").  Como este metodo so e chamado pela thread geradora, o
-        proxy e criado e usado exclusivamente por ela -- sem necessidade de
-        `_pyroClaimOwnership`.
-        """
+        # cria ou reaproveita o proxy pyro do destinatário
         if destino not in self.proxies:
             self.proxies[destino] = Pyro5.api.Proxy(self.uris_pares[destino])
         return self.proxies[destino]
 
-    # ------------------------------------------------------------------ #
-    # Encerramento                                                        #
-    # ------------------------------------------------------------------ #
     def deve_continuar(self) -> bool:
-        """Condicao de parada do requestLoop (checada a cada ~2 s pelo Pyro)."""
+        # checa se ainda tá dentro do tempo total da simulação
         return time.time() < self.tempo_inicio + self.duracao + self.dreno
 
     def finalizar(self) -> None:
-        """Grava o RESUMO no log e o fecha (chamado ao sair do requestLoop)."""
+        # grava o resumo das estatísticas no fim do log e fecha o arquivo
         with self.bloqueio:
             s = self.stats
             self._registrar(
@@ -379,11 +239,8 @@ class Processo:
         self.registro.fechar()
 
 
-# ====================================================================== #
-# 3. DESCOBERTA NO SERVIDOR DE NOMES                                      #
-# ====================================================================== #
 def localizar_ns(host: str, porta: int, timeout: float = 15.0) -> Pyro5.api.Proxy:
-    """Procura o servidor de nomes Pyro5 com rete ate `timeout` segundos."""
+    # procura o nameserver com retentativas até dar o timeout
     fim = time.time() + timeout
     ultimo_erro = None
     while time.time() < fim:
@@ -393,16 +250,13 @@ def localizar_ns(host: str, porta: int, timeout: float = 15.0) -> Pyro5.api.Prox
             ultimo_erro = exc
             time.sleep(0.25)
     raise RuntimeError(
-        f"servidor de nomes nao encontrado em {host}:{porta} ({ultimo_erro}). "
-        "Inicie com: python -m Pyro5.nameserver"
+        f"servidor de nomes não encontrado em {host}:{porta} ({ultimo_erro}). "
+        "inicie com: python -m Pyro5.nameserver"
     )
 
 
 def registrar_no_ns(ns: Pyro5.api.Proxy, nome: str, uri) -> None:
-    """
-    Registra o processo no nameserver.  Se ja existir um registro antigo
-    (processo anterior morto sem limpeza), remove e registra de novo.
-    """
+    # registra o processo no nameserver (sobrescreve se já existia um velho)
     try:
         ns.register(nome, uri)
     except NamingError:
@@ -413,12 +267,7 @@ def registrar_no_ns(ns: Pyro5.api.Proxy, nome: str, uri) -> None:
 def descobrir_pares(
     ns: Pyro5.api.Proxy, meu_id: str, n: int, timeout: float = 20.0
 ) -> dict:
-    """
-    Localiza as URIs dos demais processos ("processo.P1"..."processo.Pn").
-    Como os processos sobem em paralelo, o lookup e refeito com atraso ate
-    `timeout`; se algum par nunca aparecer, o processo segue com os que
-    encontrar (e avisa no log).
-    """
+    # procura os outros processos no nameserver até todo mundo aparecer
     alvos = [f"P{i}" for i in range(1, n + 1) if f"P{i}" != meu_id]
     uris = {}
     fim = time.time() + timeout
@@ -433,22 +282,20 @@ def descobrir_pares(
     return uris
 
 
-# ====================================================================== #
-# 4. MAIN                                                                #
-# ====================================================================== #
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Processo com relogio vetorial (Pyro5)")
-    p.add_argument("--id", required=True, help="identificador: P1, P2, P3 ou P4")
-    p.add_argument("--n", type=int, default=4, help="quantidade de processos do sistema")
-    p.add_argument("--duracao", type=float, default=30.0, help="segundos gerando eventos")
-    p.add_argument("--host", default="127.0.0.1", help="host deste daemon Pyro5")
-    p.add_argument("--ns-host", default="127.0.0.1", help="host do servidor de nomes")
-    p.add_argument("--ns-port", type=int, default=9090, help="porta do servidor de nomes")
-    p.add_argument("--descoberta", type=float, default=20.0, help="timeout de descoberta (s)")
+    # argumentos de linha de comando
+    p = argparse.ArgumentParser(description="processo com relógio vetorial (Pyro5)")
+    p.add_argument("--id", required=True, help="identificador do processo (P1, P2, P3 ou P4)")
+    p.add_argument("--n", type=int, default=4, help="quantidade total de processos")
+    p.add_argument("--duracao", type=float, default=30.0, help="tempo gerando eventos (segundos)")
+    p.add_argument("--host", default="127.0.0.1", help="host deste processo Pyro5")
+    p.add_argument("--ns-host", default="127.0.0.1", help="host do Name Server")
+    p.add_argument("--ns-port", type=int, default=9090, help="porta do Name Server")
+    p.add_argument("--descoberta", type=float, default=20.0, help="timeout para descobrir outros nós (s)")
     p.add_argument(
         "--log-dir",
         default=str(Path(__file__).resolve().parent / "logs"),
-        help="pasta dos logs (logs/Pi.log)",
+        help="pasta dos arquivos de log",
     )
     return p.parse_args()
 
@@ -458,9 +305,7 @@ def main() -> None:
     meu_id = args.id.upper()
     caminho_log = Path(args.log_dir) / f"{meu_id}.log"
 
-    # --- infraestrutura Pyro5 ---------------------------------------- #
-    # O daemon e o servidor que recebe as chamadas remotas deste processo;
-    # ele e que executa `receber_evento` nas threads do pool.
+    # sobe o daemon do pyro pra receber chamadas remotas
     daemon = Pyro5.api.Daemon(host=args.host)
     ns = localizar_ns(args.ns_host, args.ns_port)
 
@@ -470,7 +315,7 @@ def main() -> None:
     nome = f"processo.{meu_id}"
     registrar_no_ns(ns, nome, uri)
 
-    # --- descoberta dos pares (antes de comecar a gerar eventos) ------ #
+    # busca os outros processos antes de começar a disparar eventos
     uris = descobrir_pares(ns, meu_id, args.n, timeout=args.descoberta)
     processo.uris_pares = uris
 
@@ -488,25 +333,23 @@ def main() -> None:
                 processo.relogio.copia(),
             )
 
-    # O relogio comeca a contar a partir de agora (descoberta ja concluida).
+    # inicia a thread que gera os eventos locais
     processo.tempo_inicio = time.time()
     thread_gerador = processo.iniciar_geracao()
 
     try:
-        # Loop principal: fica ouvindo as chamadas dos outros processos ate
-        # terminar `duracao + dreno` segundos.  O Pyro reavalia a condicao a
-        # cada ~2 s (POLLTIMEOUT), entao o desligamento e bem proximo do fim.
+        # fica escutando chamadas dos outros nós até bater o tempo limite
         daemon.requestLoop(loopCondition=processo.deve_continuar)
     except KeyboardInterrupt:
         processo.parar.set()
 
-    # Espera a thread geradora terminar o envio que estava em andamento.
+    # espera a thread geradora terminar de vez
     processo.parar.set()
     thread_gerador.join(timeout=5)
 
     processo.finalizar()
     try:
-        ns.remove(nome)  # limpa o nameserver para a proxima execucao
+        ns.remove(nome)  # remove do nameserver pra não deixar sujeira pra próxima vez
     except Exception:
         pass
     daemon.close()
